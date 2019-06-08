@@ -1,36 +1,14 @@
-# ---
-# jupyter:
-#   jupytext:
-#     text_representation:
-#       extension: .py
-#       format_name: light
-#       format_version: '1.4'
-#       jupytext_version: 1.1.2
-#   kernelspec:
-#     display_name: Python 3
-#     language: python
-#     name: python3
-# ---
-
-# # Daily Mortgage Calculator
-#
-# Run as:
-#
-# ```
-# Mortgage(270060.03, 23, 0.0179, 1188.00).payment_summary(datetime(2019,7,1), datetime(2020,6,30))
-# ```
-#
-
-import pandas as pd
-import numpy as np
-from datetime import datetime, date, timedelta
-import matplotlib.pyplot as plt
+# import pandas as pd
+# import numpy as np
+# from datetime import datetime, date, timedelta
+# import matplotlib.pyplot as plt
 
 import pandas as pd
 from datetime import date
 import numpy as np
 from collections import OrderedDict
 from dateutil.relativedelta import *
+import calendar
 
 
 class Mortgage(object):
@@ -40,12 +18,13 @@ class Mortgage(object):
     
     @staticmethod
     def amortize(principal, interest_rate, years=25, monthly_pmt=None, addl_principal=0, 
-                 start_date=date.today(), end_date=None, payment_date=1):
+                 start_date=date.today(), end_date=None, payment_day=1):
         """
         Create amortization entries for the interest and payment of the loan
         """
         ANNUAL_PAYMENTS = 365  # TODO deal with leap years
 
+        # TODO: move to class init
         if not end_date:
             end_date = start_date+relativedelta(years=years)
 
@@ -54,7 +33,8 @@ class Mortgage(object):
 
         # initialize the variables to keep track of the periods and running balances
         p = 1
-        beg_balance = principal
+        beg_balance = round(principal, 2)
+        end_balance = round(beg_balance, 2)
         running_date = start_date
 
         while end_balance > 0 and running_date < start_date+relativedelta(years=years):
@@ -63,26 +43,26 @@ class Mortgage(object):
             daily_interest = round(((interest_rate/ANNUAL_PAYMENTS) * beg_balance), 2)
 
             # Payments only made 1 day a month
-            if running_date.day == payment_date:
-                pmt = monthly_pmt
+            if running_date.day == payment_day:
+                pmt = round(monthly_pmt, 2)
                 # Determine payment based on whether or not this period will pay off the loan
                 pmt = min(pmt, beg_balance + daily_interest)
                 principal = pmt - daily_interest
                 # Ensure additional payment gets adjusted if the loan is being paid off
-                addl_principal = min(addl_principal, beg_balance - principal)
+                addl_pmt = min(round(addl_principal, 2), beg_balance - principal)
             else:
                 pmt = 0
-                addl_principal = 0
+                addl_pmt = 0
 
             # Updated balance at end of day
-            end_balance = beg_balance + daily_interest - (pmt + addl_principal)
+            end_balance = beg_balance + daily_interest - (pmt + addl_pmt)
 
             yield OrderedDict([('Date',running_date),
                                ('Period', p),
                                ('Begin Balance', beg_balance),
                                ('Payment', pmt),
                                ('Interest', daily_interest),
-                               ('Additional_Payment', addl_principal),
+                               ('Additional_Payment', addl_pmt),
                                ('End Balance', end_balance)])
 
             # Increment the counter, balance and date
@@ -90,17 +70,21 @@ class Mortgage(object):
             running_date += relativedelta(days=1)
             beg_balance = end_balance
         
-    @staticmethod
-    def amortize_table(*args, **kwargs):
+    @classmethod
+    def amortize_table(cls, *args, **kwargs):
         """create an amortization table as a dataframe"""
-        return pd.DataFrame(amortize(*args, **kwargs))
+        return pd.DataFrame(cls.amortize(*args, **kwargs))
     
-    def __init__(self, principal, term, annual_interest_rate, monthly_payment):
+    def __init__(self, principal, term, annual_interest_rate, monthly_payment, start_date=date.today(),
+                 end_date=None, payment_day=1):
         self.principal = principal
         self.term = term
         self.annual_interest_rate = annual_interest_rate
-        self.interest_calculated = interest_calculated
+        self.interest_calculated = 'daily'
         self.monthly_payment = monthly_payment
+        self.start_date = start_date
+        self.end_date = end_date
+        self.payment_day = payment_day
         
         # make daily schedule
         self.schedule = self.calc_schedule()
@@ -120,7 +104,10 @@ class Mortgage(object):
         schedule = self.amortize_table(self.principal,
                                        self.annual_interest_rate,
                                        years=self.term,
-                                       monthly_pmt=self.monthly_payment)
+                                       monthly_pmt=self.monthly_payment,
+                                       start_date=self.start_date,
+                                       end_date=self.end_date,
+                                       payment_day=self.payment_day)
         
         # Ensure dt dtype
         schedule['Date'] = pd.to_datetime(schedule['Date'])
@@ -132,23 +119,37 @@ class Mortgage(object):
         """Aggregate the schedule to Month Level"""
         schedule = self.schedule
         
+        schedule['year'] = schedule['Date'].dt.year
+        schedule['month'] = schedule['Date'].dt.month
+        schedule['day'] = schedule['Date'].dt.day
+        schedule['end_day'] = schedule[['year', 'month']].apply(lambda x: calendar.monthrange(x.year, x.month)[1],
+                                                                axis=1)
+
+
         schedule_mon = schedule\
-            .groupby([schedule['Date'].dt.year, schedule['Date'].dt.month])\
+            .groupby(['year', 'month'])\
             .agg({'Payment': 'sum',
                   'Interest': 'sum',
-                  'Additional_Payment': 'sum',
-                  'End Balance': 'min'
+                  'Additional_Payment': 'sum'
                  }
                 )
 
         schedule_mon.index.names = ['year', 'month']
         schedule_mon.reset_index(inplace=True)
+        
+        month_end_balances = schedule.loc[schedule['day'] == schedule['end_day'], 
+                                          ['year', 'month', 'End Balance']]
 
+        
+        schedule_mon = schedule_mon.merge(month_end_balances, how='inner', on=['year', 'month'])
+        
         schedule_mon['day'] = 1 # start of month
-        schedule_mon['Date'] = pd.to_datetime(schedule_mon[['year', 'month', 'day']])
+        schedule_mon['Month Date'] = pd.to_datetime(schedule_mon[['year', 'month', 'day']])
 
         # Monthly principal amounts    
         schedule_mon['Principal'] = schedule_mon['Payment'] - schedule_mon['Interest']
+        
+        schedule_mon.drop(['day', 'month', 'year'], axis=1, inplace=True)
         
         return schedule_mon
         
@@ -160,27 +161,36 @@ class Mortgage(object):
         # Yearly
         start_date = schedule['Date'].min()
         schedule['years_out'] = schedule['Date'].apply(lambda x: relativedelta(x, start_date).years)
-
+        schedule['end_of_year_window'] = schedule['years_out'].diff(-1).fillna(-1).abs()
+        
         schedule_yr = schedule\
             .groupby([schedule['years_out']])\
             .agg({'Payment': 'sum',
                   'Interest': 'sum',
                   'Additional_Payment': 'sum',
-                  'End Balance': 'min',
                   'Date': 'min',
                   'Date': 'max'
                  }
                 )
 
-        schedule_yr.reset_index(inplace=True)
-
-        # Monthly principal amounts    
+        schedule_yr.reset_index(drop=False, inplace=True)
         schedule_yr['Principal'] = schedule_yr['Payment'] - schedule_yr['Interest']
+        
+        yearly_end_balances = schedule.loc[schedule['end_of_year_window'] == 1, 
+                                           ['years_out', 'End Balance']]
+
+        schedule_yr = schedule_yr.merge(yearly_end_balances, how='inner', on=['years_out'])
 
         return schedule_yr
         
-    def payment_summary(self, start_date, end_date):
+    def payment_summary(self, start_date=None, end_date=None):
         """Summary of cost of mortgage between two dates"""
+        
+        if not start_date:
+            start_date = self.start_date
+        
+        if not end_date:
+            end_date = self.end_date
         
         df = self.schedule\
                    .loc[(self.schedule['Date'] >= start_date) & (self.schedule['Date'] <= end_date), :]
@@ -189,94 +199,9 @@ class Mortgage(object):
                                 'Total Payments': [df['Payment'].sum()],
                                 'Total Interest': [df['Interest'].sum()],
                                 'Total Additional Payments': [df['Additional_Payment'].sum()],
-                                'End Balance': [df['End Balance'].min()],
+                                'End Balance': df.loc[df['Date'] == end_date, 'End Balance'].values,
                                 'Start Date': [df['Date'].min()],
                                 'End Date': [df['Date'].max()]},
                                index=None)
         
         return summary
-
-
-
-# +
-mortgage = Mortgage(270060.03,
-                    23,
-                    0.0163,
-                    1167.02)
-
-mortgage
-# -
-
-mortgage.payment_summary(datetime(2019,7,1), datetime(2020,6,30))
-
-mortgage.schedule_monthly.head()
-
-
-
-
-
-
-
-Mortgage(270060.03, 23, 0.0163, 1167.02).payment_summary(datetime(2019,7,1), datetime(2020,6,30))
-
-Mortgage(270060.03, 23, 0.0179, 1188.00).payment_summary(datetime(2019,7,1), datetime(2020,6,30))
-
-
-
-
-
-# +
-# mortgage.calc_schedule()
-
-mortgage.schedule.head()
-
-# +
-a = mortgage.amortize(200000, .02, 25, start_date=date(2019,6,1))
-
-a
-
-# +
-schedule = mortgage.amortize_table(200000, .02, 25, start_date=date(2019,6,1))
-# schedule = pd.DataFrame(amortize(270060.03, .0163, 5, 1167.02))
-
-schedule.head()
-# -
-
-schedule_tots
-
-import seaborn as sns
-sns.set()
-import matplotlib.pyplot as plt
-
-
-def plot_results(monthly_schedule):
-    """
-    Visual the monthly schedule
-    """
-    
-    plt.figure()
-    ax = sns.lineplot(x="Date", y="End Balance",
-                 markers=True, dashes=False,
-                 data=monthly_schedule)
-    
-    plt.figure()
-    ax2 = sns.lineplot(x="Date", y="Payment", markers=True, dashes=False, data=monthly_schedule)
-    ax2 = sns.lineplot(x="Date", y="Interest", markers=True, dashes=False, data=monthly_schedule)
-    ax2 = sns.lineplot(x="Date", y="Principal", markers=True, dashes=False, data=monthly_schedule)
-
-
-
-plot_results(schedule_mon)
-
-
-
-
-
-schedule_mon.plot('Date', 'End Balance', marker='o')
-
-schedule_mon.plot('Date', 'Interest', marker='o', color='r')
-schedule_mon.plot('Date', 'Principal', marker='o', color='g')
-
-
-
-

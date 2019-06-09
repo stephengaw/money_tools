@@ -7,73 +7,97 @@ import pandas as pd
 from datetime import date
 import numpy as np
 from collections import OrderedDict
-from dateutil.relativedelta import *
+from dateutil.relativedelta import relativedelta
 import calendar
+
+
+def amortize(principal: float, interest_rate: float, years: int=25, monthly_pmt: float=None, addl_principal: float=0, 
+             start_date: date=date.today(), end_date: date=None, payment_day: int=1
+    ):
+    """Creates the amortization table entries.
+    
+    Parameters
+    ----------
+    principal : float
+        Starting loan amount.
+    interest_rate : float
+        The interest rate expressed as a decimal.
+    years : int, optional
+        Number of years for the loan, by default 25
+    monthly_pmt : float, optional
+        The regular monthly payment amount, by default None
+    addl_principal : float, optional
+        Any additional monthly payment made at the same time as the monthly_pmt, by default 0
+    start_date : date, optional
+        Starting date to build amortisation table, by default today's date
+    end_date : date, optional
+        End date to build the amortisation table up to, by default the start date plus the number of years
+    payment_day : int, optional
+        Day of the month when monthly payments are taken, by default 1 for the first day of the month
+
+    Yields
+    ------
+    OrderedDict
+
+    """
+    ANNUAL_PAYMENTS = 365  # TODO deal with leap years
+
+    # TODO: move to class init
+    if not end_date:
+        end_date = start_date+relativedelta(years=years)
+
+    if not monthly_pmt:
+        monthly_pmt = -round(np.pmt(interest_rate/12, years*12, principal), 2)
+
+    # initialize the variables to keep track of the periods and running balances
+    p = 1
+    beg_balance = round(principal, 2)
+    end_balance = round(beg_balance, 2)
+    running_date = start_date
+
+    while end_balance > 0 and running_date < start_date+relativedelta(years=years):
+
+        # Recalculate the interest based on the current balance
+        daily_interest = round(((interest_rate/ANNUAL_PAYMENTS) * beg_balance), 2)
+
+        # Payments only made 1 day a month
+        if running_date.day == payment_day:
+            pmt = round(monthly_pmt, 2)
+            # Determine payment based on whether or not this period will pay off the loan
+            pmt = min(pmt, beg_balance + daily_interest)
+            principal = pmt - daily_interest
+            # Ensure additional payment gets adjusted if the loan is being paid off
+            addl_pmt = min(round(addl_principal, 2), beg_balance - principal)
+        else:
+            pmt = 0
+            addl_pmt = 0
+
+        # Updated balance at end of day
+        end_balance = beg_balance + daily_interest - (pmt + addl_pmt)
+
+        yield OrderedDict([('Date',running_date),
+                            ('Period', p),
+                            ('Begin Balance', beg_balance),
+                            ('Payment', pmt),
+                            ('Interest', daily_interest),
+                            ('Additional_Payment', addl_pmt),
+                            ('End Balance', end_balance)])
+
+        # Increment the counter, balance and date
+        p += 1
+        running_date += relativedelta(days=1)
+        beg_balance = end_balance
+
+
+def amortize_table(*args, **kwargs):
+    """create an amortization table as a dataframe"""
+    return pd.DataFrame(amortize(*args, **kwargs))
 
 
 class Mortgage(object):
     """
     Mortgage Class, for calculating mortgage interest, payments, etc...
     """
-    
-    @staticmethod
-    def amortize(principal, interest_rate, years=25, monthly_pmt=None, addl_principal=0, 
-                 start_date=date.today(), end_date=None, payment_day=1):
-        """
-        Create amortization entries for the interest and payment of the loan
-        """
-        ANNUAL_PAYMENTS = 365  # TODO deal with leap years
-
-        # TODO: move to class init
-        if not end_date:
-            end_date = start_date+relativedelta(years=years)
-
-        if not monthly_pmt:
-            monthly_pmt = -round(np.pmt(interest_rate/12, years*12, principal), 2)
-
-        # initialize the variables to keep track of the periods and running balances
-        p = 1
-        beg_balance = round(principal, 2)
-        end_balance = round(beg_balance, 2)
-        running_date = start_date
-
-        while end_balance > 0 and running_date < start_date+relativedelta(years=years):
-
-            # Recalculate the interest based on the current balance
-            daily_interest = round(((interest_rate/ANNUAL_PAYMENTS) * beg_balance), 2)
-
-            # Payments only made 1 day a month
-            if running_date.day == payment_day:
-                pmt = round(monthly_pmt, 2)
-                # Determine payment based on whether or not this period will pay off the loan
-                pmt = min(pmt, beg_balance + daily_interest)
-                principal = pmt - daily_interest
-                # Ensure additional payment gets adjusted if the loan is being paid off
-                addl_pmt = min(round(addl_principal, 2), beg_balance - principal)
-            else:
-                pmt = 0
-                addl_pmt = 0
-
-            # Updated balance at end of day
-            end_balance = beg_balance + daily_interest - (pmt + addl_pmt)
-
-            yield OrderedDict([('Date',running_date),
-                               ('Period', p),
-                               ('Begin Balance', beg_balance),
-                               ('Payment', pmt),
-                               ('Interest', daily_interest),
-                               ('Additional_Payment', addl_pmt),
-                               ('End Balance', end_balance)])
-
-            # Increment the counter, balance and date
-            p += 1
-            running_date += relativedelta(days=1)
-            beg_balance = end_balance
-        
-    @classmethod
-    def amortize_table(cls, *args, **kwargs):
-        """create an amortization table as a dataframe"""
-        return pd.DataFrame(cls.amortize(*args, **kwargs))
     
     def __init__(self, principal, term, annual_interest_rate, monthly_payment, start_date=date.today(),
                  end_date=None, payment_day=1):
@@ -101,13 +125,13 @@ class Mortgage(object):
     
     def calc_schedule(self):
         """Daily payment schedule, accounting for interest paid daily"""
-        schedule = self.amortize_table(self.principal,
-                                       self.annual_interest_rate,
-                                       years=self.term,
-                                       monthly_pmt=self.monthly_payment,
-                                       start_date=self.start_date,
-                                       end_date=self.end_date,
-                                       payment_day=self.payment_day)
+        schedule = amortize_table(self.principal,
+                                  self.annual_interest_rate,
+                                  years=self.term,
+                                  monthly_pmt=self.monthly_payment,
+                                  start_date=self.start_date,
+                                  end_date=self.end_date,
+                                  payment_day=self.payment_day)
         
         # Ensure dt dtype
         schedule['Date'] = pd.to_datetime(schedule['Date'])
@@ -192,8 +216,8 @@ class Mortgage(object):
         if not end_date:
             end_date = self.end_date
         
-        df = self.schedule\
-                   .loc[(self.schedule['Date'] >= start_date) & (self.schedule['Date'] <= end_date), :]
+        df = self.schedule \
+                 .loc[(self.schedule['Date'] >= start_date) & (self.schedule['Date'] <= end_date), :]
         
         summary = pd.DataFrame({'Start Balance': [df['Begin Balance'].max()],
                                 'Total Payments': [df['Payment'].sum()],

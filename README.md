@@ -6,16 +6,16 @@
 pip install -e .
 ```
 
-## Build
-
-```bash
-
-```
-
 ## Test
 
 ```bash
 python setup.py test
+```
+
+## Build
+
+```bash
+python setup.py bdist_wheel
 ```
 
 ## Run

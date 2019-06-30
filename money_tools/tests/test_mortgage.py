@@ -42,7 +42,6 @@ class TestMortgage(object):
 
         assert round(amortisation_table.iloc[-1, -1], 2) == 88_939.88
 
-        # * Expected Google Sheets Result = 88,939.85, my calc gives 88,939.88????
         # - Interest Calculated at day start
         # - Everythin rounded to 2-decimal places
 
@@ -85,7 +84,6 @@ class TestMortgage(object):
                         )
 
         assert round(mortgage.schedule_monthly['End Balance'].iloc[-1], 2) == 88_939.88
-        # * Expected Google Sheets Result = 88,939.85, my calc gives 88,939.88????
 
     def test_schedule_multi_year(self):
         mortgage = Mortgage(100_000,

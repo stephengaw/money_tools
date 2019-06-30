@@ -1,7 +1,6 @@
-# import pandas as pd
-# import numpy as np
-# from datetime import datetime, date, timedelta
-# import matplotlib.pyplot as plt
+"""
+Mortgage class with associated summary and plotting functionality
+"""
 
 import pandas as pd
 from datetime import date
@@ -9,9 +8,14 @@ import numpy as np
 from collections import OrderedDict
 from dateutil.relativedelta import relativedelta
 import calendar
+import matplotlib.pyplot as plt
 
 
-def amortize(principal: float, interest_rate: float, years: int=25, monthly_pmt: float=None, addl_principal: float=0, 
+# Plotting Methods
+_general_plot_properties = dict(linewidth=1.0, marker='', linestyle='-')
+
+
+def _amortize(principal: float, interest_rate: float, years: int=25, monthly_pmt: float=None, addl_principal: float=0, 
              start_date: date=date.today(), end_date: date=None, payment_day: int=1
     ):
     """Creates the amortization table entries.
@@ -91,7 +95,7 @@ def amortize(principal: float, interest_rate: float, years: int=25, monthly_pmt:
 
 def amortize_table(*args, **kwargs):
     """create an amortization table as a dataframe"""
-    return pd.DataFrame(amortize(*args, **kwargs))
+    return pd.DataFrame(_amortize(*args, **kwargs))
 
 
 class Mortgage(object):
@@ -229,3 +233,57 @@ class Mortgage(object):
                                index=None)
         
         return summary
+
+    def plot_monthly_schedule(self):
+        """
+        Visual the monthly schedule
+        """
+        monthly_schedule = self.schedule_monthly
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(6, 10))
+        
+        # remaining Balance plots
+        ax1.plot(monthly_schedule["Month Date"], monthly_schedule["End Balance"], color='r', label='Payment', **_general_plot_properties)
+
+        # Breakdown of monthly payment plots
+        ax2.plot(monthly_schedule["Month Date"], monthly_schedule["Payment"], color='k', label='Payment', **_general_plot_properties)
+        ax2.plot(monthly_schedule["Month Date"], monthly_schedule["Interest"], color='b', label='Interest Paid', **_general_plot_properties)
+        ax2.plot(monthly_schedule["Month Date"], monthly_schedule["Principal"], color='g', label='Pricipal Paid', **_general_plot_properties)
+        
+        ax1.set_ylabel('Amount')
+        ax2.set_ylabel('Amount')
+        ax2.set_xlabel('Payment Month')
+        
+        # rotate x-labels 45deg
+        for tick in ax2.get_xticklabels():
+            tick.set_rotation(45)
+
+        ax1.legend()
+        ax2.legend()
+
+        ax1.title.set_text('Monthly Payment Schedule')
+        
+        
+    def plot_cumulative_monthly_schedule(self):
+        """
+        Visualise the cumulative monthly schedule 
+        """
+
+        monthly_schedule = self.schedule_monthly
+        
+        monthly_schedule['Cumulative Payment'] = monthly_schedule['Payment'].cumsum()
+        monthly_schedule['Cumulative Principal'] = monthly_schedule['Principal'].cumsum()
+        monthly_schedule['Cumulative Interest'] = monthly_schedule['Interest'].cumsum()
+        
+        plt.figure()
+        plt.plot(monthly_schedule["Month Date"], monthly_schedule["End Balance"], color='r', label='Remaining Balance', **_general_plot_properties)
+        plt.plot(monthly_schedule["Month Date"], monthly_schedule["Cumulative Payment"], color='k', label='Cumulative Payments', **_general_plot_properties)
+        plt.plot(monthly_schedule["Month Date"], monthly_schedule["Cumulative Principal"], color='b', label='Cumulative Principal Paid', **_general_plot_properties)
+        plt.plot(monthly_schedule["Month Date"], monthly_schedule["Cumulative Interest"], color='g', label='Cumulative Interest Paid', **_general_plot_properties)
+        
+        plt.legend()
+        plt.xlabel('Payment Month')
+        plt.xticks(rotation=45)
+        plt.ylabel('Amount')
+
+        plt.title('Cumulative Monthly Payment Schedule')

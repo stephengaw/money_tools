@@ -18,31 +18,80 @@ class Mortgage(object):
     """
     Mortgage Class, for calculating mortgage interest, payments, etc...
     """
-    
-    def __init__(self, rates: list):
+
+    @staticmethod
+    def validate_rate_config(rate_config: dict):
+        """Validate the rate config dict.
+        """
+        if not isinstance(rate_config, dict):
+            raise ValueError(f'Rate config must be dict object. Recieved a rate config of type {type(rate_config)}')
+
+        # TODO: add further config validation checks
+
+    def __init__(self, start_balance: float, rates_configs: list):
+        """Creata a Mortgage object from which summary information can be viewed.
+        
+        Parameters
+        ----------
+        start_balance : float
+            The starting balance owed on the mortgage
+        rates_configs : list[dict]
+            Details of the various rates with associated start and end dates that 
+            apply across the mortgage.
+
+            The listed dictionary has the structure::
+
+            {
+                "rate": 0.01,
+                "monthly_payment": 1100,
+                "start_date": '2019-01-01',
+                "term": None,
+                "end_date": '2020-12-31',
+                "payment_day": 1
+            }
+        """
         
         # Check rates not empty
-        n_rates = len(rates)
+        n_rates = len(rates_configs)
         if n_rates == 0:
             raise ValueError('The list of rates cannot be empty')
-        elif n_rates > 1:
-            raise NotImplementedError('Only single rate mortgages are currently implemented')
-            # TODO: implement multiple rates per mortgage
 
         # Check all list entries are valid rates
-        for rate in rates:
-            if type(rate) != Rate:
-                raise ValueError(f'All rates must be valid Rate object. Recieved a rate of type {type(rate)}')
-        
-        rate = rates[0]
-        self.start_balance = rate.start_balance
-        self.annual_interest_rate = rate.annual_interest_rate
-        self.monthly_payment = rate.monthly_payment
-        self.start_date = rate.start_date
-        self.end_date = rate.end_date
-        self.payment_day = rate.payment_day
-        self.schedule = rate.schedule
-        self.end_balance = rate.end_balance
+        for rate_config in rates_configs:
+            self.validate_rate_config(rate_config)
+                
+        self.start_balance = start_balance
+
+        # Construct all rates
+        self.rates = list()
+        rate_start_balance = start_balance
+        for rate_config in rates_configs:
+            rate = Rate(
+                rate_start_balance,
+                rate_config['rate'],
+                rate_config['monthly_payment'],
+                start_date=rate_config['start_date'],
+                term=rate_config['term'],
+                end_date=rate_config['end_date'],
+                payment_day=rate_config['payment_day'],
+            )
+            rate_start_balance = rate.end_balance
+            self.rates.append(rate)
+
+        # Combine all the Schedules
+        self.schedule = None
+        for rate in self.rates:
+            if isinstance(self.schedule, pd.DataFrame):
+                self.schedule = self.schedule.append(rate.schedule, ignore_index=True)
+            else:
+                self.schedule = rate.schedule
+
+        # Mortage Rate Dates
+        self.start_date = self.schedule['Date'].iloc[0]
+        self.end_date = self.schedule['Date'].iloc[-1]
+
+        # Final end balances of all rates
+        self.end_balance = self.rates[-1].end_balance
 
         # Schedules expressed in other time granularities
         self.schedule_monthly = self.calc_schedule_monthly()

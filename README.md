@@ -19,3 +19,5 @@ python setup.py bdist_wheel
 ```
 
 ## Run
+
+Using the example `scratch-mortgage.ipynb` notebook file for running some examples.
